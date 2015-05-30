@@ -1,8 +1,17 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <inttypes.h>
+#ifdef HAVE_CONFIG_H
+   #include "config.h"
+#endif
+#ifdef HAVE_INTTYPES_H
+   #include <inttypes.h>
+#endif
 
-#define SWAP_BIG_ENDIAN_OR_NATIVE(v) swab_inplace((char *)&(v), sizeof(v))
+#if WORDS_BIGENDIAN
+   #define SWAP_BIG_ENDIAN_OR_NATIVE(v)
+#else
+   #define SWAP_BIG_ENDIAN_OR_NATIVE(v) swab_inplace((char *)&(v), sizeof(v))
+#endif
 
 static void swab_inplace(char *buf, size_t bytes) {
    size_t i= 0;
