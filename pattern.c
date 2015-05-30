@@ -42,8 +42,9 @@ static void die(char const *msg, ...) {
    exit(EXIT_FAILURE);
 }
 
-/* Pack the base-256 encoded binary big-endian integer from <inbuf> (which
- * is <ilen> bytes long) into the array <outbuf> (which is <olen> bytes long).
+/* Pack the base-256 encoded binary big-endian unsigned integer from <inbuf>
+ * (which is <ilen> bytes long) into the array <outbuf> (which is <olen> bytes
+ * long).
  *
  * The packed output will be placed at the end of the output array, returning
  * the pointer into the array where the packed data starts. */
@@ -98,6 +99,86 @@ static char *pack_pattern_delimited(
    return (char *)out + o;
 }
 
+static void chkinp(void) {
+   if (ferror(stdin)) die("Error reading from standard input!");
+}
+
+/* A callback function for reading more bytes from an input source. At
+ * least one byte will be requested for reading. */
+typedef void (*byte_reader)(void *dest, size_t bytes, void *related_data);
+
+/* Read a complete encoding into the input buffer <inbuf> (which is <ilen>
+ * bytes long) and decode it into a base-256 encoded binary big-endian unsiged
+ * integer into output buffer <obuf> (which is <olen> bytes long).
+ *
+ * The output buffer will be padded with leading zeroes as necessary.
+ *
+ * <byte_reader> is a callback function which needs to read more bytes from
+ * the input source. <related_data> will be passed through uninterpreted to
+ * the callback and can be used or ignored by it in any way desirable.
+ * The callback must only return if successful, otherwise it should
+ * exit the program or perform a non-local jump to some error handler.
+ *
+ * Returns the size of the complete encoding in <inbuf>. */
+static size_t unpack_pattern_delimited(
+      char *inbuf, size_t ilen, char *outbuf, size_t olen
+   ,  byte_reader callback, void *related_data
+) {
+   size_t i, total, missing, o;
+   uint8_t *in;
+   uint8_t mask, octet, *out;
+   assert(inbuf != outbuf);
+   assert(ilen);
+   assert(olen);
+   in= (uint8_t *)inbuf;
+   out= (uint8_t *)outbuf;
+   /* Find the first octet not equal to 0xff. This will allow us to calculate
+    * the required input buffer size for the whole encoding. */
+   i= 0;
+   do {
+      /* Read the next octet. */
+      assert(i < ilen);
+      #ifndef NDEBUG
+         /* Enforce assertion failure later if callback does nothing. */
+         in[i]= 0xff;
+      #endif
+      (*callback)(in + i, 1, related_data);
+   } while ((octet= in[i++]) == 0xff);
+   total= (i << 3) + 1;
+   /* Find leftmost zero bit which terminates the prefix mask. */
+   for (mask= 0x80; octet & mask; ++total) {
+      mask>>= 1;
+      assert(mask);
+   }
+   assert(total <= ilen);
+   /* Now that the total size is known, read the rest (if any). */
+   o= olen;
+   if (missing= total - i) {
+      #ifndef NDEBUG
+         /* Create a huge number if callback dares to read nothing. */
+         (void)memset(in + i, missing, 0xaa);
+      #endif
+      (*callback)(in + i, missing, related_data);
+      /* Also copy the missing data to the end of <outbuf>. */
+      assert(o > missing); /* We have already read at least one octet. */
+      (void)memcpy(out + (o-= missing), in + i, missing);
+   }
+   /* Clear pattern prefix in first octet of value. */
+   assert(o);
+   out[--o]= octet & ~mask;
+   /* Pad the rest of <outbuf> with binary leading zeroes. */
+   while (o) out[--o]= 0;
+   return total;
+}
+
+static void read_callback(void *dest, size_t bytes, void *related_data) {
+   (void)related_data;
+   if (fread(dest, bytes, 1, stdin) != 1) {
+      chkinp();
+      if (feof(stdin)) die("Unexpected end-of-file encountered!");
+   }
+}
+
 int main(int argc, char **argv) {
    uint8_t buf[(64 + (7 - 1)) / 7];
    uint_fast64_t num;
@@ -112,16 +193,30 @@ int main(int argc, char **argv) {
          if (
             fwrite(start, (char *)buf + sizeof buf - start, 1, stdout) != 1
          ) {
-            wr_err: die("Failure writing to standard output!");
+            goto wr_err;
          }
       }
-      if (ferror(stdin)) die("Error reading from standard input!");
+      chkinp();
       if (!feof(stdin)) {
          die("Unrecognized trailing garbage on standard input!");
       }
+   } else if (!strcmp(argv[1], "-d")) {
+      int c;
+      while ((c= getchar()) != EOF) {
+         if (ungetc(c, stdin) == EOF) die("Internal error!");
+         (void)unpack_pattern_delimited(
+            buf, sizeof buf, (char *)&num, sizeof num, &read_callback, 0
+         );
+         TOGGLE_BIG_ENDIAN_OR_NATIVE(num);
+         if (printf("%" PRIuFAST64 "\n", num) < 0) goto wr_err;
+      }
+      chkinp();
+      assert(feof(stdin));
+   } else {
+      goto usage;
    }
-   else if (!strcmp(argv[1], "-d")) die("NYI");
-   else goto usage;
-   if (fflush(0)) goto wr_err;
+   if (fflush(0)) {
+      wr_err: die("Failure writing to standard output!");
+   }
    return EXIT_SUCCESS;
 }
