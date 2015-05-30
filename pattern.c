@@ -28,10 +28,11 @@ int main(void) {
    while (fscanf(stdin, "%" SCNuFAST64, &inbuf) == 1) {
       SWAP_BIG_ENDIAN_OR_NATIVE(inbuf);
       if (fwrite(&inbuf, sizeof inbuf, 1, stdout) != 1) {
-         die("Failure writing to standard output!");
+         wr_err: die("Failure writing to standard output!");
       }
    }
    if (ferror(stdin)) die("Error reading from standard input!");
    if (!feof(stdin)) die("Unrecognized trailing garbage on standard input!");
+   if (fflush(0)) goto wr_err;
    return EXIT_SUCCESS;
 }
