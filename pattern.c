@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <limits.h>
+#include <string.h>
+#include <stdarg.h>
 #include <assert.h>
 
 #ifdef HAVE_CONFIG_H
@@ -30,8 +32,13 @@
    }
 #endif
 
-static void die(char const *msg) {
-   (void)fprintf(stderr, "An error occurred: %s\n", msg);
+static void die(char const *msg, ...) {
+   va_list arg;
+   (void)fputs("An error occurred: ", stderr);
+   va_start(arg, msg);
+   (void)vfprintf(stderr, msg, arg);
+   va_end(arg);
+   (void)fputc('\n', stderr);
    exit(EXIT_FAILURE);
 }
 
@@ -91,21 +98,30 @@ static char *pack_pattern_delimited(
    return (char *)out + o;
 }
 
-int main(void) {
-   uint8_t obuf[(64 + (7 - 1)) / 7];
-   uint_fast64_t inbuf;
-   while (fscanf(stdin, "%" SCNuFAST64, &inbuf) == 1) {
-      char *start;
-      TOGGLE_BIG_ENDIAN_OR_NATIVE(inbuf);
-      start= pack_pattern_delimited(
-         (char const *)&inbuf, sizeof inbuf, obuf, sizeof obuf
-      );
-      if (fwrite(start, (char *)obuf + sizeof obuf - start, 1, stdout) != 1) {
-         wr_err: die("Failure writing to standard output!");
+int main(int argc, char **argv) {
+   uint8_t buf[(64 + (7 - 1)) / 7];
+   uint_fast64_t num;
+   if (argc != 2) usage: die("Usage: %s (-e | -d)", argv[0]);
+   if (!strcmp(argv[1], "-e")) {
+      while (fscanf(stdin, "%" SCNuFAST64, &num) == 1) {
+         char *start;
+         TOGGLE_BIG_ENDIAN_OR_NATIVE(num);
+         start= pack_pattern_delimited(
+            (char const *)&num, sizeof num, buf, sizeof buf
+         );
+         if (
+            fwrite(start, (char *)buf + sizeof buf - start, 1, stdout) != 1
+         ) {
+            wr_err: die("Failure writing to standard output!");
+         }
+      }
+      if (ferror(stdin)) die("Error reading from standard input!");
+      if (!feof(stdin)) {
+         die("Unrecognized trailing garbage on standard input!");
       }
    }
-   if (ferror(stdin)) die("Error reading from standard input!");
-   if (!feof(stdin)) die("Unrecognized trailing garbage on standard input!");
+   else if (!strcmp(argv[1], "-d")) die("NYI");
+   else goto usage;
    if (fflush(0)) goto wr_err;
    return EXIT_SUCCESS;
 }
