@@ -58,13 +58,14 @@ static char *pack_pattern_delimited(
       if (out[--o]= in[--i]) sig= o;
    }
    o= sig;
+   recheck:
    plen= olen - o;
    assert(plen >= 1);
    /* Prefix the output with a 1...10 bit pattern <plen> bits wide, where
     * <plen> is the number of bytes in the whole output. */
    ffs= plen >> 3; /* Number of full 0xFF prefix bytes. */
    /* Number of remaining bits to prefix within the first value byte. */
-   plen&= ~7;
+   plen&= 7;
    /* Build prefix mask for first value byte. */
    bit= 0x80;
    for (mask= 0; plen--; bit>>= 1) mask|= bit;
@@ -75,7 +76,8 @@ static char *pack_pattern_delimited(
    if (out[o] & mask) {
       /* It collides. Write to a new octet which gets prepended. */
       assert(o);
-      out[--o]= mask + mask & 0xff;
+      out[--o]= 0;
+      goto recheck;
    } else {
       /* No collision. Merge with first octet of value. */
       out[o]|= mask + mask & 0xff;
