@@ -134,8 +134,7 @@ static size_t unpack_pattern_delimited(
    out= (uint8_t *)outbuf;
    /* Find the first octet not equal to 0xff. This will allow us to calculate
     * the required input buffer size for the whole encoding. */
-   i= 0;
-   do {
+   for (i= 0;; ++i) {
       /* Read the next octet. */
       assert(i < ilen);
       #ifndef NDEBUG
@@ -143,12 +142,13 @@ static size_t unpack_pattern_delimited(
          in[i]= 0xff;
       #endif
       (*callback)(in + i, 1, related_data);
-   } while ((octet= in[i++]) == 0xff);
-   total= (i << 3) + 1;
-   /* Find leftmost zero bit which terminates the prefix mask. */
+      if ((octet= in[i]) != 0xff) break;
+   }
+   total= (i++ << 3) + 1; /* Include terminating zero bit of pattern. */
+   /* Add "1"-bits before the terminating "0" bit. */
    for (mask= 0x80; octet & mask; ++total) {
       mask>>= 1;
-      assert(mask);
+      assert(mask); /* <octet> cannot be completely "1"-filled. */
    }
    assert(total <= ilen);
    /* Now that the total size is known, read the rest (if any). */
