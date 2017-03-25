@@ -9,12 +9,14 @@
 /NEWS
 /README
 /aclocal.m4
+/aproto_opcodes.txt
 /autom4te.cache/
 /autoscan-*.log
 /compile
 /depcomp
 /install-sh
 /missing
+/new_encoding.html
 /pattern
 /stamp-h1
 config.h
