@@ -29,4 +29,7 @@ done | {
 	do
 		echo $x
 	done
-} | sort -nu
+} | sort -nu | while read LINE
+do
+	printf '%s\n%d\n' "$LINE" 0xdd
+done
