@@ -1,6 +1,6 @@
 /* Read an arbitrary number of unsigned integers (up to 64 significant bits)
- * from standard input and write the pattern-delimited gbproto encoding of them
- * to standard output. */
+ * from standard input and write the pattern-delimited gbproto encoding of
+ * them to standard output. */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,14 +20,15 @@
    #define TOGGLE_BIG_ENDIAN_OR_NATIVE(v)
 #else
    #define TOGGLE_BIG_ENDIAN_OR_NATIVE(v) \
-      swab_inplace((char *)&(v), sizeof(v))
+      swao_inplace((char *)&(v), sizeof(v))
 
-   static void swab_inplace(char *buf, size_t bytes) {
+   static void swao_inplace(char *buf, size_t octets) {
       size_t i= 0;
-      while (bytes > i + 1) {
+      assert(CHAR_BIT == 8);
+      while (octets > i + 1) {
          char t= buf[i];
-         buf[i++]= buf[--bytes];
-         buf[bytes]= t;
+         buf[i++]= buf[--octets];
+         buf[octets]= t;
       }
    }
 #endif
@@ -43,8 +44,8 @@ static void die(char const *msg, ...) {
 }
 
 /* Pack the base-256 encoded binary big-endian unsigned integer from <inbuf>
- * (which is <ilen> bytes long) into the array <outbuf> (which is <olen> bytes
- * long).
+ * (which is <ilen> octets long) into the array <outbuf> (which is <olen>
+ * octets long).
  *
  * The packed output will be placed at the end of the output array, returning
  * the pointer into the array where the packed data starts. */
@@ -57,9 +58,9 @@ static char *pack_pattern_delimited(
    assert(CHAR_BIT == 8);
    assert(inbuf != outbuf);
    assert(olen >= ilen); assert(ilen > 0);
-   /* At least the last byte is always significant. */
+   /* At least the last octet is always significant. */
    sig= olen - 1;
-   /* Copy verbatim and detect position of most significant byte. */
+   /* Copy verbatim and detect position of most significant octet. */
    in= (uint8_t const *)inbuf; out= (uint8_t *)outbuf;
    for (i= ilen , o= olen; i; ) {
       assert(i); assert(o);
@@ -70,14 +71,16 @@ static char *pack_pattern_delimited(
    plen= olen - o;
    assert(plen >= 1);
    /* Prefix the output with a 1...10 bit pattern <plen> bits wide, where
-    * <plen> is the number of bytes in the whole output. */
-   ffs= plen >> 3; /* Number of full 0xFF prefix bytes. */
-   /* Number of remaining bits to prefix within the first value byte. */
-   plen&= 7;
-   /* Build prefix mask for first value byte. */
+    * <plen> is the number of octets in the whole output. */
+   ffs= plen - 1 >> 3; /* Number of full 0xFF prefix octets. */
+   /* Number of remaining bits to prefix within the first value octet. */
+   plen= (plen - 1 & 7) + 1;
+   assert(plen >= 1);
+   assert(plen <= 8);
+   /* Build prefix mask for first value octet. */
    bit= 0x80;
    for (mask= 0; plen--; bit>>= 1) mask|= bit;
-   /* Check whether mask collides with bits of first value byte.
+   /* Check whether mask collides with bits of first value octet.
     *
     * The prefix to be written is the same as the mask, except for the
     * last "1"-bit of the mask which needs to be changed to a "0". */
@@ -103,17 +106,17 @@ static void chkinp(void) {
    if (ferror(stdin)) die("Error reading from standard input!");
 }
 
-/* A callback function for reading more bytes from an input source. At
- * least one byte will be requested for reading. */
-typedef void (*byte_reader)(void *dest, size_t bytes, void *related_data);
+/* A callback function for reading more octets from an input source. At
+ * least one octet will be requested for reading. */
+typedef void (*octet_reader)(void *dest, size_t octets, void *related_data);
 
 /* Read a complete encoding into the input buffer <inbuf> (which is <ilen>
- * bytes long) and decode it into a base-256 encoded binary big-endian unsiged
- * integer into output buffer <obuf> (which is <olen> bytes long).
+ * octets long) and decode it into a base-256 encoded binary big-endian
+ * unsiged integer into output buffer <obuf> (which is <olen> octets long).
  *
  * The output buffer will be padded with leading zeroes as necessary.
  *
- * <byte_reader> is a callback function which needs to read more bytes from
+ * <octet_reader> is a callback function which needs to read more octets from
  * the input source. <related_data> will be passed through uninterpreted to
  * the callback and can be used or ignored by it in any way desirable.
  * The callback must only return if successful, otherwise it should
@@ -122,7 +125,7 @@ typedef void (*byte_reader)(void *dest, size_t bytes, void *related_data);
  * Returns the size of the complete encoding in <inbuf>. */
 static size_t unpack_pattern_delimited(
       char *inbuf, size_t ilen, char *outbuf, size_t olen
-   ,  byte_reader callback, void *related_data
+   ,  octet_reader callback, void *related_data
 ) {
    size_t i, total, missing, o;
    uint8_t *in;
@@ -145,7 +148,7 @@ static size_t unpack_pattern_delimited(
       if ((octet= in[i]) != 0xff) break;
    }
    total= (i++ << 3) + 1; /* Include terminating zero bit of pattern. */
-   /* Add "1"-bits before the terminating "0" bit. */
+   /* Find bit position of the terminating "0" bit. */
    for (mask= 0x80; octet & mask; ++total) {
       mask>>= 1;
       assert(mask); /* <octet> cannot be completely "1"-filled. */
@@ -165,15 +168,15 @@ static size_t unpack_pattern_delimited(
    }
    /* Clear pattern prefix in first octet of value. */
    assert(o);
-   out[--o]= octet & ~mask;
+   out[--o]= octet & mask - 1;
    /* Pad the rest of <outbuf> with binary leading zeroes. */
    while (o) out[--o]= 0;
    return total;
 }
 
-static void read_callback(void *dest, size_t bytes, void *related_data) {
+static void read_callback(void *dest, size_t octets, void *related_data) {
    (void)related_data;
-   if (fread(dest, bytes, 1, stdin) != 1) {
+   if (fread(dest, octets, 1, stdin) != 1) {
       chkinp();
       if (feof(stdin)) die("Unexpected end-of-file encountered!");
    }
